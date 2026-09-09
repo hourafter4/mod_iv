@@ -1,4 +1,4 @@
-# mod_iv.asi — mod_sp cheat menu for GTA IV
+# mod_iv — mod_sp cheat menu for GTA IV
 
 GTA IV port of [mod_v](https://github.com/hourafter4/mod_v) /
 [mod_sp](https://github.com/hourafter4/mod_sp), the single-player port of
@@ -9,10 +9,16 @@ items, bottom HUD bar with `[Inv] [VehInv] [Tires] [Bike] [AirBrk]` tags, coords
 GTA IV natives, and **GTA IV's own phone cheats** are in the menu under the
 numbers you would dial.
 
-Runs on **GTAIV.exe 1.0.7.0 and 1.0.8.0** (what
-[IV-SDK](https://github.com/Zolika1351/iv-sdk) supports; the Complete Edition
-1.2.0.x is not, downgrade first). Built with mingw on macOS/Linux, no Visual
-Studio needed. The titlebar shows the detected version.
+`make` builds two .asi files from the same source, differing only in how they
+reach the game (`src/backend.h`):
+
+| File            | Game                                        | How |
+|-----------------|---------------------------------------------|-----|
+| `mod_iv.asi`    | GTAIV.exe **1.0.7.0 / 1.0.8.0**             | [IV-SDK](https://github.com/Zolika1351/iv-sdk), fixed addresses |
+| `mod_iv_ce.asi` | **Complete Edition 1.2.0.x** (and 1.0.4-1.0.8) | pattern scanning, no fixed addresses |
+
+Built with mingw on macOS/Linux, no Visual Studio needed. The titlebar shows
+which build and which game version it detected.
 
 **Untested in-game so far** — this is a straight port written against the IV
 native list; see "Status" below.
@@ -105,19 +111,57 @@ any hour (`FORCE_TIME_OF_DAY`); re-select to release.
 
 ## Status
 
-Compiles and links (`make`), the hook trampolines and native calls check out in
-the disassembly, but nothing has been run in the game yet. Things most likely
-to need a tweak on first run: `TEXT_SX/TEXT_SY/ROW_H` (IV text scale vs. row
-height), whether `GET_STRING_WIDTH_WITH_STRING` and
+Both builds compile and link, and the generated hook code checks out in the
+disassembly (IV-SDK's trampolines; on the CE side the thread hook passes `this`
+in `ecx` and returns with `ret $4`, matching the `__thiscall` it replaces).
+Nothing has been run in the game yet.
+
+Most likely to need a tweak on first run, both builds: `TEXT_SX/TEXT_SY/ROW_H`
+(IV text scale vs. row height), whether `GET_STRING_WIDTH_WITH_STRING` and
 `GET_VIEWPORT_POSITION_OF_COORD` return 0..1 units (assumed, like `DRAW_RECT`),
 and the camera-rotation axes used by the on-foot airbrake.
+
+CE build only: every pattern is second-hand, so if the Rockstar patch level
+differs from the one Rainbomizer and FusionFix target, the native table lookup
+is the piece that has to be re-found first (nothing else runs without it). The
+menu freezing after one frame means `GET_GAME_TIMER` is not resolving, i.e. the
+hash translation guessed wrong.
+
+## How the Complete Edition build works
+
+IV-SDK is a list of addresses for 1.0.7.0 and 1.0.8.0, so it refuses to
+initialise on the Complete Edition. `mod_iv_ce.asi` therefore keeps IV-SDK's
+native *wrappers* and replaces the three things that are version-specific with
+byte-pattern lookups at load time (`src/backend_ce.h`):
+
+- **Natives.** The game keeps its natives in a hash table; the CE rehashed
+  every one of them, so the pre-CE hashes compiled into the wrappers are mapped
+  through a translation table before the lookup. If the table pattern does not
+  resolve, the .asi installs nothing at all.
+- **The per-frame tick.** `GtaThread::Run` is hooked in the script thread
+  vftable. It runs for every script thread every frame, inside the game's
+  script processing, which is the context the drawing and cheat natives expect;
+  the game timer gates it to one tick per frame. A dummy script thread is
+  installed around the tick, as IV-SDK does.
+- **The ped and vehicle pools**, used by NPC health bars and "teleport to
+  nearest empty car". These are optional: if their patterns miss, those two
+  features go quiet and the rest of the menu still works.
+
+Patterns and the hash table come from other people's work on these versions:
+[IV.EFLC.Rainbomizer](https://github.com/Parik27/IV.EFLC.Rainbomizer) (native
+table, running thread, thread vftable, and `sdk/patterns/native_hash_ce.h`
+verbatim), [GTAIV.EFLC.FusionFix](https://github.com/ThirteenAG/GTAIV.EFLC.FusionFix)
+(pool patterns and the pool handle layout), and the CitizenFX pattern scanner
+(`sdk/patterns/Patterns.*`).
 
 ## Build
 
 ```sh
-make          # needs mingw-w64 (brew install mingw-w64); GTA IV is 32-bit, so i686
+make          # both .asi files; needs mingw-w64 (brew install mingw-w64)
+make mod_iv.asi mod_iv_ce.asi    # or one at a time
 ```
 
+GTA IV is 32-bit, so everything is built with the i686 toolchain.
 `sdk/ivsdk/` is IV-SDK (GPLv3) with a handful of mingw patches, documented in
 `sdk/ivsdk/README-mingw.md`. The vehicle and weapon tables are hand-written
 (`src/vehicles_iv.h`, `src/weapons_iv.h`).
@@ -125,9 +169,13 @@ make          # needs mingw-w64 (brew install mingw-w64); GTA IV is 32-bit, so i
 ## Install
 
 1. An ASI loader for GTA IV (e.g. [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader)
-   as `dinput8.dll`, or ZolikaPatch's built-in loader).
-2. Copy `mod_iv.asi` next to `GTAIV.exe` (1.0.7.0 or 1.0.8.0).
+   as `dinput8.dll`; the Complete Edition needs one too, and ZolikaPatch or
+   FusionFix ship one).
+2. Copy the .asi for your game next to `GTAIV.exe`: `mod_iv.asi` for
+   1.0.7.0 / 1.0.8.0, `mod_iv_ce.asi` for the Complete Edition. Installing
+   both at once would run two menus, so pick one.
 
 Single-player only.
 
-License: GPLv3 (derived from mod_sp / mod_sa / mod_v; IV-SDK is GPLv3).
+License: GPLv3 (derived from mod_sp / mod_sa / mod_v; IV-SDK, Rainbomizer's
+translation table and FusionFix are GPLv3 as well).

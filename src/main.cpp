@@ -1,7 +1,12 @@
-// mod_iv.asi — GTA IV (GTAIV.exe 1.0.7.0 / 1.0.8.0) port of mod_v / mod_sp, the
-// single-player ports of mod_sa's cheat menu. Built on Zolika1351's IV-SDK
-// (sdk/ivsdk, patched for mingw): the per-frame handler runs inside the game's
-// script processing, so IV natives can be called directly.
+// mod_iv — GTA IV port of mod_v / mod_sp, the single-player ports of mod_sa's
+// cheat menu. Two builds come out of this one file (see src/backend.h):
+//
+//   mod_iv.asi     GTAIV.exe 1.0.7.0 / 1.0.8.0, on Zolika1351's IV-SDK
+//   mod_iv_ce.asi  Complete Edition (1.2.0.x) and older, pattern-scanned
+//
+// Either way the per-frame handler runs inside the game's script processing,
+// so IV natives can be called directly, and everything below this header uses
+// natives plus the four backend calls only.
 //
 // Menu structure, callbacks (MENU_OP_ENABLED / SELECT / DEC / INC), the s0beit
 // look (bottom-center window, titlebar breadcrumb, green enabled items, bottom
@@ -28,7 +33,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <math.h>
-#include "IVSDK.cpp"       // IV-SDK single translation unit (defines DllMain)
+#include "backend.h"       // IV-SDK or pattern-scanning backend, and Scripting
 #include "vehicles_iv.h"
 #include "weapons_iv.h"
 
@@ -121,20 +126,29 @@ static void my_pos(float *x, float *y, float *z)
         GET_CHAR_COORDINATES(me(), x, y, z);
 }
 
-static int player_max_health(void)
+// GTA IV health has a 100 offset: a ped dies at 100 and the player's full bar
+// is 200 (ScriptHookDotNet's Ped::Health adds/subtracts the 100 as well).
+#define HEALTH_DEAD 100
+#define HEALTH_FULL 200
+
+// script handles of every live slot in a RAGE pool (see struct iv_pool)
+static int pool_handles(struct iv_pool *p, int *out, int max)
 {
-    CPed *p = FindPlayerPed();
-    int m = p ? (int)p->m_fMaxHealth : 0;
-    return m > 0 ? m : 200;
+    if (!p || !p->storage || !p->flags || p->size <= 0)
+        return 0;
+    int n = 0;
+    for (int i = 0; i < p->size && n < max; i++)
+        if (!(p->flags[i] & 0x80))
+            out[n++] = (i << 8) | p->flags[i];
+    return n;
 }
 
-// streams a model synchronously (IV-SDK SpawnCarExample)
+// streams a model in synchronously
 static bool load_model(unsigned int model)
 {
     if (!IS_MODEL_IN_CDIMAGE(model))
         return false;
-    CStreaming::ScriptRequestModel((int32_t)model);
-    CStreaming::LoadAllRequestedModels(false);
+    backend_request_model(model);
     return HAS_MODEL_LOADED(model) != 0;
 }
 
@@ -300,15 +314,14 @@ static void teleport_nearest_car(void)
     float px, py, pz;
     GET_CHAR_COORDINATES(me(), &px, &py, &pz);
 
+    static int vehs[512];
+    int n = pool_handles(backend_veh_pool(), vehs, 512);
+
     Vehicle best = 0;
     float best_d = 0.0f;
-    CPool<CVehicle> *pool = CPools::ms_pVehiclePool;
-    for (int i = 0; i < (int)pool->m_nCount; i++)
+    for (int i = 0; i < n; i++)
     {
-        CVehicle *cv = pool->Get(i);
-        if (!cv)
-            continue;
-        Vehicle v = (Vehicle)pool->GetIndex(cv);
+        Vehicle v = vehs[i];
         if (v == mine || !DOES_VEHICLE_EXIST(v) || IS_CAR_DEAD(v))  // VEHICLE_ALIVE
             continue;
         Ped drv = 0;
@@ -387,7 +400,7 @@ static void heal_player(void)  // health + armor (phone cheat 362-555-0100)
     Ped p = me();
     unsigned int max_armour = 100;
     GET_PLAYER_MAX_ARMOUR(me_pl(), &max_armour);
-    SET_CHAR_HEALTH(p, player_max_health());
+    SET_CHAR_HEALTH(p, HEALTH_FULL);
     ADD_ARMOUR_TO_CHAR(p, max_armour);
 }
 
@@ -603,9 +616,8 @@ static void apply_cheats(float dt)
         SET_CHAR_PROOFS(ped, TRUE, TRUE, TRUE, TRUE, TRUE);
         unsigned int hp = 0;
         GET_CHAR_HEALTH(ped, &hp);
-        int maxhp = player_max_health();
-        if ((int)hp < maxhp)
-            SET_CHAR_HEALTH(ped, maxhp);
+        if ((int)hp < HEALTH_FULL)
+            SET_CHAR_HEALTH(ped, HEALTH_FULL);
     }
 
     if (inf_ammo)
@@ -1518,7 +1530,11 @@ static float text_width(const char *txt)
     return GET_STRING_WIDTH_WITH_STRING("STRING", txt);
 }
 
-static const char *g_version = "?";  // "1.0.7.0" / "1.0.8.0" once detected
+#if MOD_IV_CE
+#define MOD_IV_NAME "mod_iv CE"
+#else
+#define MOD_IV_NAME "mod_iv"
+#endif
 
 // ===================== menu draw (s0beit RenderMenu look) =====================
 static void menu_draw(void)
@@ -1535,7 +1551,7 @@ static void menu_draw(void)
 
     /* titlebar: name + breadcrumb path (s0beit "NAME > Sub > Sub") */
     static char title[192];
-    snprintf(title, sizeof(title), "mod_iv %s (" __DATE__ ")", g_version);
+    snprintf(title, sizeof(title), MOD_IV_NAME " %s (" __DATE__ ")", backend_version_name());
     struct menu *root;
     for (root = m; root->parent != NULL; root = root->parent);
     while (root != m)
@@ -1665,8 +1681,8 @@ static void hud_draw(void)
 }
 
 // ===================== NPC health bars =====================
-// Walks the ped pool directly (IV-SDK PoolsExample); health comes from the
-// CPed fields, the screen position from the viewport native.
+// Ped handles come from the ped pool (the backend locates it); everything else
+// is natives, so this is the same code on both builds.
 #define HPBAR_MAX_DIST 60.0f
 
 static void hpbars_draw(void)
@@ -1674,33 +1690,38 @@ static void hpbars_draw(void)
     if (!npc_hpbars)
         return;
 
-    CPed *self = FindPlayerPed();
-    if (!self || !self->m_pMatrix)
+    Ped self = me();
+    static int peds[512];
+    int n = pool_handles(backend_ped_pool(), peds, 512);
+    if (n == 0)
         return;
-    CVector mp = self->m_pMatrix->pos;
+
+    float mx, my, mz;
+    GET_CHAR_COORDINATES(self, &mx, &my, &mz);
 
     int vp = 0;
     GET_GAME_VIEWPORT_ID(&vp);
 
-    CPool<CPed> *pool = CPools::ms_pPedPool;
-    for (int i = 0; i < (int)pool->m_nCount; i++)
+    for (int i = 0; i < n; i++)
     {
-        CPed *p = pool->Get(i);
-        if (!p || p == self || p->m_bDead || !p->m_pMatrix)
+        Ped p = peds[i];
+        if (p == self || !DOES_CHAR_EXIST(p) || IS_CHAR_DEAD(p))
             continue;
 
-        CVector pos = p->m_pMatrix->pos;
-        float dx = pos.x - mp.x, dy = pos.y - mp.y, dz = pos.z - mp.z;
+        float px, py, pz;
+        GET_CHAR_COORDINATES(p, &px, &py, &pz);
+        float dx = px - mx, dy = py - my, dz = pz - mz;
         float d2 = dx * dx + dy * dy + dz * dz;
         if (d2 > HPBAR_MAX_DIST * HPBAR_MAX_DIST)
             continue;
 
         float sx = 0.0f, sy = 0.0f;
-        if (!GET_VIEWPORT_POSITION_OF_COORD(pos.x, pos.y, pos.z + 1.1f, vp, &sx, &sy))  // just above the head
+        if (!GET_VIEWPORT_POSITION_OF_COORD(px, py, pz + 1.0f, vp, &sx, &sy))  // just above the head
             continue;
 
-        float maxhp = p->m_fMaxHealth > 0.0f ? p->m_fMaxHealth : 100.0f;
-        float frac = p->m_fPedHealth / maxhp;
+        unsigned int hp = 0;
+        GET_CHAR_HEALTH(p, &hp);
+        float frac = ((float)hp - HEALTH_DEAD) / (float)(HEALTH_FULL - HEALTH_DEAD);
         if (frac < 0.0f) frac = 0.0f;
         if (frac > 1.0f) frac = 1.0f;
 
@@ -1723,14 +1744,15 @@ static void draw_overlays(void)
 }
 
 // ===================== per-frame hook =====================
-// plugin::processScriptsEvent runs once per frame inside the game's script
-// processing (natives are valid here); nothing runs while the game is paused.
+// The backend calls this once per frame from the game's script processing
+// (natives are valid there); nothing runs while the game is paused.
 static void tick(void)
 {
-    if (!FindPlayerPed())  // main menu / loading: no player yet
+    if (!IS_PLAYER_PLAYING(me_pl()))  // main menu / loading / dead
         return;
 
-    float dt = CTimer::ms_fTimeStep;
+    float dt = 0.0f;
+    GET_FRAME_TIME(&dt);
     if (dt <= 0.0f)  dt = 0.02f;
     if (dt > 0.1f)   dt = 0.1f;
     g_fps += (1.0f / dt - g_fps) * 0.05f;
@@ -1746,11 +1768,24 @@ static void tick(void)
         draw_overlays();
 }
 
-void plugin::gameStartupEvent()
+#if MOD_IV_CE
+
+// Complete Edition build: find the game's native table and pools, then hook
+// GtaThread::Run for the tick. Called from DllMain (src/backend_ce.h).
+void mod_iv_ce_startup(void)
 {
-    if (plugin::gameVer == plugin::VERSION_1070)
-        g_version = "1.0.7.0";
-    else if (plugin::gameVer == plugin::VERSION_1080)
-        g_version = "1.0.8.0";
+    if (!ce_natives_init())
+        return;      // no native table: nothing this .asi does would work
+    ce_pools_init();  // optional: NPC health bars / nearest car degrade without them
+    ce_tick_init(tick);
+}
+
+#else
+
+// IV-SDK build: the SDK calls this once it has recognised the game version.
+void plugin::gameStartupEvent(void)
+{
     plugin::processScriptsEvent::Add(tick);
 }
+
+#endif
