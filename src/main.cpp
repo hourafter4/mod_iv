@@ -15,8 +15,9 @@
 //
 // Menu: ] open/close, Up/Down select, Right/Enter activate or open submenu,
 // Left back/close; on value items Left/Right adjust and Enter resets.
-// Hotkeys: hold B = speed boost; / = airbrake toggle (WASD + Space/X,
-// camera-relative on foot, hold B for 2x); Numpad +/-/* = boost & airbrake strength.
+// Hotkeys: hold Left Alt (mod_sa's own boost key, unbound in GTA IV) or B =
+// speed boost; / = airbrake toggle (WASD + Space/X, camera-relative on foot,
+// boost key for 2x); Numpad +/-/* = boost & airbrake strength.
 //
 // GTA IV's own phone cheats are in the Cheats menu (health/armor/weapon sets,
 // wanted level, weather) and the Vehicles > Spawn menu (the cheat spawns),
@@ -66,9 +67,19 @@ static bool key_pressed(int key)
     return game_focused() && IS_GAME_KEYBOARD_KEY_JUST_PRESSED(key);
 }
 
-#define KEY_BOOST    KEY_B                     // hold: speed boost
+// Left Alt is mod_sa's / mod_sp's boost key and GTA IV leaves it unbound (aim
+// is the right mouse button, sprint Left Shift, crouch Left Ctrl), so unlike
+// mod_v — where Alt switches character — it can be used here. B stays as a
+// second binding.
+#define KEY_BOOST    KEY_LEFT_ALT              // hold: speed boost
+#define KEY_BOOST2   KEY_B                     // hold: speed boost (alternate)
 #define KEY_MENU     KEY_SQUARE_BRACKET_RIGHT  // ]
 #define KEY_AIRBRAKE KEY_FORWARDSLASH          // /
+
+static bool boost_held(void)
+{
+    return key_down(KEY_BOOST) || key_down(KEY_BOOST2);
+}
 
 // ===================== geometry constants =====================
 // s0beit geometry (mod_sa dumb_menu.h: MENU_WIDTH 400/440, MENU_ROWS 12) in
@@ -590,7 +601,7 @@ static void airbrake_tick(float dt)
     }
 
     float step = 112.5f * dt * strength;
-    if (key_down(KEY_BOOST))  // hold B: 2x airbrake speed
+    if (boost_held())  // hold the boost key: 2x airbrake speed
         step *= 2.0f;
     airbrake_freeze(false);
     float x, y, z;
@@ -680,12 +691,12 @@ static void apply_cheats(float dt)
         SET_CAN_BURST_CAR_TYRES(veh, FALSE);
     }
 
-    bool boosting = !airbrake && key_down(KEY_BOOST);
+    bool boosting = !airbrake && boost_held();
     if (airbrake)
         airbrake_tick(dt);
     else if (boosting)
         boost_tick(dt);
-    if (!boosting && foot_boost_active)  // B released: back to normal run speed
+    if (!boosting && foot_boost_active)  // released: back to normal run speed
     {
         foot_boost_active = false;
         SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER(ped, 1.0f);

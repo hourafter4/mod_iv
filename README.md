@@ -32,9 +32,14 @@ native list; see "Status" below.
 | Right / Enter | activate / toggle / open submenu (Enter resets game speed, boost strength) |
 | Left          | back to parent menu / close  |
 | Left / Right  | decrease / increase value items (game speed, strength, colors, livery) |
-| **hold B**    | speed boost (on foot or car) |
-| / (or num /)  | airbrake toggle: WASD + Space/X, camera-relative on foot, hold B for 2x |
+| **hold Left Alt** (or B) | speed boost (on foot or car) |
+| / (or num /)  | airbrake toggle: WASD + Space/X, camera-relative on foot, hold the boost key for 2x |
 | Numpad +/-/*  | boost & airbrake strength    |
+
+Boost is on **Left Alt**, the key mod_sa and mod_sp used: GTA IV leaves Alt
+unbound (aim is the right mouse button, sprint Left Shift, crouch Left Ctrl),
+so the reason mod_v had to move it to B — Alt switches character in GTA V —
+does not apply. B still works too.
 
 Player controls are *not* disabled while the menu is open (unlike mod_v): GTA
 IV binds none of the menu keys on foot. Boost on foot speeds up the movement
