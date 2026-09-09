@@ -137,16 +137,20 @@ ce_probe_translation (void)
     if (ce_native_index (probe) != -1)
     {
         g_translate = 0;
+        mod_iv_log ("native hashes: used as-is");
         return;
     }
 
     const std::unordered_map<uint32_t, uint32_t> &t = GetNativeTranslationTable ();
     std::unordered_map<uint32_t, uint32_t>::const_iterator it = t.find (probe);
     if (it != t.end () && ce_native_index (it->second) != -1)
+    {
         g_translate = 1;
-
-    mod_iv_log ("native hashes: %s", g_translate ? "translated (Complete Edition)"
-                                                 : "used as-is");
+        mod_iv_log ("native hashes: translated (Complete Edition)");
+    }
+    // still undecided: the table is not fully registered yet, and the caller
+    // retries on the next native. Nothing is logged until it settles, or the
+    // log would get a line per native call.
 }
 
 uint32_t
