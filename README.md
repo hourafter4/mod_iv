@@ -32,7 +32,7 @@ which build and which game version it detected.
 | Left          | back to parent menu / close  |
 | Left / Right  | decrease / increase value items (game speed, strength, colors, livery) |
 | **hold Left Alt** (or B) | speed boost (on foot or car) |
-| / (or num /)  | airbrake toggle: WASD + Space/X, camera-relative on foot, hold the boost key for 2x |
+| / (or num /)  | airbrake toggle: camera-relative WASD on foot or in cars; Space up, X down; hold the boost key for 2x |
 | Numpad +/-/*  | boost & airbrake strength    |
 
 Boost is on **Left Alt**, the key mod_sa and mod_sp used: GTA IV leaves Alt
@@ -105,6 +105,11 @@ any hour (`FORCE_TIME_OF_DAY`); re-select to release.
 **Misc** — airbrake, boost/airbrake strength, HUD indicators, NPC health bars
 (red distance-scaled bars above peds within 60 m, read from the ped pool).
 
+Airbrake follows the camera in cars as well as on foot: W/S move along the
+view direction (including looking up or down), A/D strafe horizontally, and
+Space/X rise/descend vertically. Vehicle movement uses the no-offset position
+setter so repeated movement does not accumulate a placement-height offset.
+
 ### Dropped
 
 - **TBoGT-only cheats** — explosive sniper rounds (486-555-2526), super punch
@@ -130,7 +135,7 @@ The normal IV-SDK build has not been validated in-game.
 Most likely to need a tweak on first run, both builds: `TEXT_SX/TEXT_SY/ROW_H`
 (IV text scale vs. row height), whether `GET_STRING_WIDTH_WITH_STRING` and
 `GET_VIEWPORT_POSITION_OF_COORD` return 0..1 units (assumed, like `DRAW_RECT`),
-and the camera-rotation axes used by the on-foot airbrake.
+and the camera-rotation axes used by airbrake.
 
 CE build only: every pattern is second-hand, so if the Rockstar patch level
 differs from the one Rainbomizer and FusionFix target, the native table lookup

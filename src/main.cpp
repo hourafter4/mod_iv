@@ -569,22 +569,9 @@ static void airbrake_tick(float dt)
         return;
     }
 
-    // in a car move along the vehicle's own axes (mod_sa vehicle airbrake);
-    // on foot move camera-relative
+    // Use the camera's yaw and pitch both on foot and in vehicles.
     float front[3], right[3];
-    if (veh)
-    {
-        float fx = 0.0f, fy = 0.0f;
-        GET_CAR_FORWARD_X(veh, &fx);
-        GET_CAR_FORWARD_Y(veh, &fy);
-        float rl = sqrtf(fx * fx + fy * fy);
-        if (rl < 0.05f)
-            return;  // pointing straight up/down: no usable axes
-        front[0] = fx / rl; front[1] = fy / rl; front[2] = 0.0f;
-        right[0] = fy / rl; right[1] = -fx / rl; right[2] = 0.0f;
-    }
-    else
-        cam_axes(front, right);
+    cam_axes(front, right);
 
     float d[3] = { 0, 0, 0 };
     if (key_down(KEY_W)) { d[0] += front[0]; d[1] += front[1]; d[2] += front[2]; }
@@ -608,7 +595,7 @@ static void airbrake_tick(float dt)
     my_pos(&x, &y, &z);
     x += d[0] * step; y += d[1] * step; z += d[2] * step;
     if (veh)
-        SET_CAR_COORDINATES(veh, x, y, z);
+        SET_CAR_COORDINATES_NO_OFFSET(veh, x, y, z);
     else
         SET_CHAR_COORDINATES_NO_OFFSET(ped, x, y, z);
 }
