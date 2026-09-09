@@ -20,8 +20,7 @@ reach the game (`src/backend.h`):
 Built with mingw on macOS/Linux, no Visual Studio needed. The titlebar shows
 which build and which game version it detected.
 
-**Untested in-game so far** — this is a straight port written against the IV
-native list; see "Status" below.
+**CE startup-crash fix awaiting in-game verification** — see "Status" below.
 
 ## Controls
 
@@ -119,7 +118,14 @@ any hour (`FORCE_TIME_OF_DAY`); re-select to release.
 Both builds compile and link, and the generated hook code checks out in the
 disassembly (IV-SDK's trampolines; on the CE side the thread hook passes `this`
 in `ecx` and returns with `ret $4`, matching the `__thiscall` it replaces).
-Nothing has been run in the game yet.
+The CE build was reported to crash when entering story mode. The current
+build fixes an incorrect operand offset in the running-script-thread lookup:
+CE needs byte +11, but the original code read +10 and then accessed a malformed
+pointer on the first script tick. Hook installation now requires that thread
+pointer, and the menu waits until the native table and game timer resolve.
+Synthetic CE/legacy instruction tests confirm the offset fix and thread-pointer
+restoration; the rebuilt CE binary still needs an in-game story-mode retest.
+The normal IV-SDK build has not been validated in-game.
 
 Most likely to need a tweak on first run, both builds: `TEXT_SX/TEXT_SY/ROW_H`
 (IV text scale vs. row height), whether `GET_STRING_WIDTH_WITH_STRING` and
@@ -128,9 +134,10 @@ and the camera-rotation axes used by the on-foot airbrake.
 
 CE build only: every pattern is second-hand, so if the Rockstar patch level
 differs from the one Rainbomizer and FusionFix target, the native table lookup
-is the piece that has to be re-found first (nothing else runs without it). The
-menu freezing after one frame means `GET_GAME_TIMER` is not resolving, i.e. the
-hash translation guessed wrong.
+is the piece that has to be re-found first (nothing else runs without it).
+If the current-thread pattern is missing, the hook is not installed; if native
+registration is incomplete, the original game scripts keep running while the
+mod waits.
 
 ## How the Complete Edition build works
 
@@ -139,10 +146,10 @@ initialise on the Complete Edition. `mod_iv_ce.asi` therefore keeps IV-SDK's
 native *wrappers* and replaces the three things that are version-specific with
 byte-pattern lookups at load time (`src/backend_ce.h`):
 
-- **Natives.** The game keeps its natives in a hash table; the CE rehashed
-  every one of them, so the pre-CE hashes compiled into the wrappers are mapped
-  through a translation table before the lookup. If the table pattern does not
-  resolve, the .asi installs nothing at all.
+- **Natives.** The game keeps its natives in a hash table. The backend probes
+  its hash format using Rainbomizer's translation table; the SDK wrapper hashes
+  already match the CE values and pass through unchanged. If the table pattern
+  does not resolve, the .asi installs nothing at all.
 - **The per-frame tick.** `GtaThread::Run` is hooked in the script thread
   vftable. It runs for every script thread every frame, inside the game's
   script processing, which is the context the drawing and cheat natives expect;

@@ -115,9 +115,11 @@ ce_probe_translation (void)
 {
     const uint32_t probe = 0x8b3fed78;
 
-    g_translate = 0;
     if (ce_native_index (probe) != -1)
+    {
+        g_translate = 0;
         return;
+    }
 
     const std::unordered_map<uint32_t, uint32_t> &t = GetNativeTranslationTable ();
     std::unordered_map<uint32_t, uint32_t>::const_iterator it = t.find (probe);
@@ -128,10 +130,14 @@ ce_probe_translation (void)
 uint32_t
 CTheScripts::FindNativeAddress (uint32_t nativeHash)
 {
-    if (!g_natives || !g_native_count)
+    if (!g_natives || !g_native_count || !*g_natives || !*g_native_count)
         return 0;
     if (g_translate < 0)
         ce_probe_translation ();
+    // Script processing can begin before registration finishes. An absent
+    // probe is not evidence for old hashes; retry once the table is ready.
+    if (g_translate < 0)
+        return 0;
 
     if (g_translate)
     {
@@ -193,6 +199,10 @@ ce_run_hook (void *thread, void *edx, unsigned int a)
 {
     static unsigned int last_frame = 0xFFFFFFFFu;
 
+    // Do not enter the menu with unresolved natives during startup.
+    if (!CTheScripts::FindNativeAddress (NATIVE_GET_GAME_TIMER))
+        return g_orig_run (thread, edx, a);
+
     unsigned int now = 0;
     Scripting::GET_GAME_TIMER (&now);
     if (now != last_frame)
@@ -221,11 +231,17 @@ ce_tick_init (void (*tick) (void))
 {
     // CTheScripts::m_pCurrentThread, so the dummy thread can be installed
     // around our tick the way IV-SDK does (patterns: Rainbomizer CTheScripts.cc)
+    bool was_ce = false;
     void *rt = ce_find2 ("83 f8 03 0f 84 ? ? ? ? 8b 35",
-                         "83 f8 03 0f 84 ? ? ? ? a1", 0, NULL);
-    if (rt)
-        g_running_thread = injector::ReadMemory<uint32_t *> (
-            (char *) rt + (injector::ReadMemory<uint8_t> ((char *) rt + 9) == 0x35 ? 11 : 10));
+                         "83 f8 03 0f 84 ? ? ? ? a1", 0, &was_ce);
+    if (!rt)
+        return false;
+    // CE uses 8B 35 <address> (operand +11), older builds A1 <address>
+    // (operand +10). At +9 the CE byte is 8B, not the 35 ModRM byte.
+    g_running_thread = injector::ReadMemory<uint32_t *> (
+        (char *) rt + (was_ce ? 11 : 10));
+    if (!g_running_thread)
+        return false;
 
     void *m = ce_find ("c7 86 a8 00 00 00 00 00 00 00 8b c6 5e c3", -9);
     if (!m)
