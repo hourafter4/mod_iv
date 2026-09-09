@@ -1337,6 +1337,7 @@ static void menu_maybe_init(void)
     /* main menu -> vehicles -> spawn: the phone-cheat spawns first, then a
        submenu per class; models the installed game doesn't have (EFLC) are
        dropped here */
+    mod_iv_log("menu: asking the game which vehicle models exist");
     menu_sep_add(m_spawn, "Phone cheat spawns");
     for (i = 0; i < SPAWN_CHEAT_COUNT; i++)
     {
@@ -1349,6 +1350,7 @@ static void menu_maybe_init(void)
     menu_sep_add(m_spawn, "All vehicles");
     for (int c = 0; c < CLASS_COUNT; c++)
     {
+        mod_iv_log("menu: class %d/%d (%s)", c + 1, CLASS_COUNT, CLASS_NAMES[c]);
         struct menu *mc = menu_new(m_spawn, cb_vehicles);
         for (i = 0; i < VEHICLE_COUNT; i++)
         {
@@ -1400,6 +1402,7 @@ static void menu_maybe_init(void)
     menu_item_add(m_misc, NULL, "NPC health bars", IT_NPC_HP, NULL);
 
     menu_active = m_main;
+    mod_iv_log("menu built (%d items in the main menu)", m_main->count);
 }
 
 // ===================== menu input (port of mod_sa menu_run) =====================
@@ -1409,7 +1412,10 @@ static void menu_input(void)
         return;
 
     if (key_pressed(KEY_MENU))
+    {
+        menu_maybe_init();  // built on first open: see the note in tick()
         menu_open = !menu_open;
+    }
 
     // global hotkeys (work with menu closed too)
     if (key_pressed(KEY_AIRBRAKE) || key_pressed(KEY_NUMPAD_FORWARDSLASH))
@@ -1755,7 +1761,16 @@ static void tick(void)
     if (dt > 0.1f)   dt = 0.1f;
     g_fps += (1.0f / dt - g_fps) * 0.05f;
 
-    menu_maybe_init();
+    static bool first_tick = true;
+    if (first_tick)
+    {
+        first_tick = false;
+        mod_iv_log("first tick with a player");
+    }
+
+    // the menu is built the first time it is opened (menu_input), not here:
+    // it asks the game about ~190 vehicle models, which is no work to be doing
+    // in the middle of a loading screen
 
     bool paused = IS_PAUSE_MENU_ACTIVE() != 0;
 
@@ -1772,10 +1787,14 @@ static void tick(void)
 // GtaThread::Run for the tick. Called from DllMain (src/backend_ce.h).
 void mod_iv_ce_startup(void)
 {
+    mod_iv_log("--- mod_iv_ce attach (" __DATE__ " " __TIME__ ")");
     if (!ce_natives_init())
+    {
+        mod_iv_log("natives: NOT FOUND, nothing installed");
         return;      // no native table: nothing this .asi does would work
+    }
     ce_pools_init();  // optional: NPC health bars / nearest car degrade without them
-    ce_tick_init(tick);
+    mod_iv_log("tick hook: %s", ce_tick_init(tick) ? "ok" : "NOT INSTALLED");
 }
 
 #else
@@ -1783,6 +1802,7 @@ void mod_iv_ce_startup(void)
 // IV-SDK build: the SDK calls this once it has recognised the game version.
 void plugin::gameStartupEvent(void)
 {
+    mod_iv_log("--- mod_iv attach (" __DATE__ " " __TIME__ "), game %s", backend_version_name());
     plugin::processScriptsEvent::Add(tick);
 }
 

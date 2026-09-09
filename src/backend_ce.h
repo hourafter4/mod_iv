@@ -48,6 +48,25 @@ public:
 #include "Scripting/Scripting.h"
 
 // ===================== pattern helpers =====================
+// A pattern that survives into a later game build but lands somewhere else
+// would otherwise hand out a pointer to arbitrary memory; every address taken
+// out of the game is checked against its image first.
+static bool
+ce_in_module (const void *p)
+{
+    static uintptr_t base = 0, end = 0;
+    if (!base)
+    {
+        base = (uintptr_t) GetModuleHandleA (NULL);
+        if (!base)
+            return false;
+        PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER) base;
+        PIMAGE_NT_HEADERS nt  = (PIMAGE_NT_HEADERS) (base + dos->e_lfanew);
+        end = base + nt->OptionalHeader.SizeOfImage;
+    }
+    return (uintptr_t) p >= base && (uintptr_t) p < end;
+}
+
 // hook::get_pattern asserts when a pattern is missing; every lookup here is
 // allowed to fail instead, so that a pattern that broke costs one feature
 // rather than the whole .asi.
@@ -125,6 +144,9 @@ ce_probe_translation (void)
     std::unordered_map<uint32_t, uint32_t>::const_iterator it = t.find (probe);
     if (it != t.end () && ce_native_index (it->second) != -1)
         g_translate = 1;
+
+    mod_iv_log ("native hashes: %s", g_translate ? "translated (Complete Edition)"
+                                                 : "used as-is");
 }
 
 uint32_t
@@ -171,9 +193,15 @@ ce_natives_init (void)
             continue;
         g_natives      = injector::ReadMemory<ce_native **> (fn + sites[i].tbl);
         g_native_count = injector::ReadMemory<uint32_t *> (fn + 3);
-        if (!g_natives || !g_native_count)
+        if (!ce_in_module (g_natives) || !ce_in_module (g_native_count))
+        {
+            g_natives      = NULL;
+            g_native_count = NULL;
             continue;
+        }
         g_version_name = sites[i].name;
+        mod_iv_log ("natives: %s (table %p, count %p)", sites[i].name,
+                    (void *) g_natives, (void *) g_native_count);
         return true;
     }
     return false;
@@ -185,9 +213,12 @@ struct ce_thread_vftable
     void *dtor, *reset, *run, *update, *kill;
 };
 
-static void (*g_tick) (void)   = NULL;
-static uint32_t *g_running_thread = NULL;  // CTheScripts::m_pCurrentThread
-static uint8_t   g_thread_dummy[256];      // stands in for a script thread, as IV-SDK does
+static void (*g_tick) (void) = NULL;
+
+// Nothing here installs a script thread of its own. IV-SDK has to, because it
+// hooks CGame::Process, where no thread is current; this hook sits at the head
+// of a thread's own Run, where the game has already made that thread current.
+// Rainbomizer calls natives from the same place the same way.
 
 // GtaThread::Run is __thiscall (this in ecx, args on the stack, callee pops).
 // A __fastcall function with an unused second parameter has exactly that
@@ -209,18 +240,7 @@ ce_run_hook (void *thread, void *edx, unsigned int a)
     {
         last_frame = now;
         if (g_tick)
-        {
-            // natives that create things expect a running script thread
-            uint32_t bak = 0;
-            if (g_running_thread)
-            {
-                bak = *g_running_thread;
-                *g_running_thread = (uint32_t) (uintptr_t) g_thread_dummy;
-            }
             g_tick ();
-            if (g_running_thread)
-                *g_running_thread = bak;
-        }
     }
 
     return g_orig_run (thread, edx, a);
@@ -229,26 +249,18 @@ ce_run_hook (void *thread, void *edx, unsigned int a)
 static bool
 ce_tick_init (void (*tick) (void))
 {
-    // CTheScripts::m_pCurrentThread, so the dummy thread can be installed
-    // around our tick the way IV-SDK does (patterns: Rainbomizer CTheScripts.cc)
-    bool was_ce = false;
-    void *rt = ce_find2 ("83 f8 03 0f 84 ? ? ? ? 8b 35",
-                         "83 f8 03 0f 84 ? ? ? ? a1", 0, &was_ce);
-    if (!rt)
-        return false;
-    // CE uses 8B 35 <address> (operand +11), older builds A1 <address>
-    // (operand +10). At +9 the CE byte is 8B, not the 35 ModRM byte.
-    g_running_thread = injector::ReadMemory<uint32_t *> (
-        (char *) rt + (was_ce ? 11 : 10));
-    if (!g_running_thread)
-        return false;
-
     void *m = ce_find ("c7 86 a8 00 00 00 00 00 00 00 8b c6 5e c3", -9);
     if (!m)
         return false;
     ce_thread_vftable *vt = injector::ReadMemory<ce_thread_vftable *> (m);
-    if (!vt || !vt->run)
+    if (!ce_in_module (vt))
         return false;
+    // a real vftable: every slot points at code in the game image
+    if (!ce_in_module (vt->dtor) || !ce_in_module (vt->reset) || !ce_in_module (vt->run)
+        || !ce_in_module (vt->update) || !ce_in_module (vt->kill))
+        return false;
+
+    mod_iv_log ("thread vftable %p, Run %p", (void *) vt, vt->run);
 
     DWORD old = 0;
     injector::UnprotectMemory (vt, sizeof (*vt), old);
@@ -272,11 +284,17 @@ ce_pools_init (void)
                   "8B 15 ? ? ? ? 81 EC ? ? ? ? 8B C1", 2, NULL);
     if (m)
         g_ped_pool = injector::ReadMemory<struct iv_pool **> (m);
+    if (!ce_in_module (g_ped_pool))
+        g_ped_pool = NULL;
 
     m = ce_find2 ("8B 15 ? ? ? ? 46 3B 72 ? 7C ? 5E",
                   "8B 3D ? ? ? ? 8B CE FF D2 6A ? 6A ? 6A ? EB", 2, NULL);
     if (m)
         g_veh_pool = injector::ReadMemory<struct iv_pool **> (m);
+    if (!ce_in_module (g_veh_pool))
+        g_veh_pool = NULL;
+
+    mod_iv_log ("pools: ped=%p veh=%p", (void *) g_ped_pool, (void *) g_veh_pool);
 }
 
 // ===================== backend interface =====================

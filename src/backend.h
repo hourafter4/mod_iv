@@ -7,6 +7,8 @@
 // Everything above this line is shared: the menu, the cheats and the drawing in
 // src/main.cpp only use GTA IV script natives plus the four calls below.
 
+#include "log.h"
+
 // RAGE pool header. Same layout in every GTA IV build (IV-SDK CPool,
 // FusionFix rage::fwBasePool): a slot is free when flags[i] & 0x80, and the
 // script handle of slot i is (i << 8) | flags[i].
